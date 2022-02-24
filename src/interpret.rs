@@ -16,11 +16,6 @@ impl Interpreter {
     pub fn new(mut sema: Sema) -> Self {
         let mut builtins = HashMap::new();
         builtins
-            .entry("inspect".to_string())
-            .or_insert(Function::Builtin(Box::new(|stack| {
-                println!("{stack:?}");
-            })));
-        builtins
             .entry("printc".to_string())
             .or_insert(Function::Builtin(Box::new(|stack| {
                 match stack.pop().unwrap() {
@@ -88,7 +83,7 @@ impl Interpreter {
             Function::Code(block, ..) => {
                 self.eval(block, stack)?;
             }
-            Function::Builtin(f) => f(stack),
+            Function::Builtin(f, ..) => f(stack),
         }
         Ok(())
     }
@@ -147,7 +142,7 @@ impl Interpreter {
                         return Err("Can only compare integers".into());
                     };
                 }
-                Atom::Op(Op::Larger) => {
+                Atom::Op(Op::Greater) => {
                     if let Some(Value::U64(fst)) = stack.pop() {
                         if let Some(Value::U64(snd)) = stack.pop() {
                             let res = snd > fst;

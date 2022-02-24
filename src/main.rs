@@ -1,11 +1,11 @@
-mod token;
-mod sema;
 mod interpret;
+mod sema;
+mod token;
 
 use owo_colors::OwoColorize;
 
-use sema::{Ast, Sema};
 use crate::interpret::Interpreter;
+use sema::{Ast, Sema};
 
 fn main() {
     const PROG: &'static str = r#"
@@ -20,14 +20,25 @@ fn main() {
             end
         end
     "#;
-//          fn not with bool returns bool begin
-//              if false else true end
-//          end
     let mut lexer = token::lex(PROG);
     let ast = Ast::parse(PROG, &mut lexer);
 
     println!("ast: {ast:?}");
     let sema = Sema::from_ast(ast);
+    match sema.type_check("main") {
+        Ok(_) => println!("{}", "type checked `main`!".green()),
+        Err(e) => {
+            println!("{}\n{e}", "Did not type check:".red());
+            return;
+        }
+    }
+    match sema.type_check("main") {
+        Ok(_) => println!("{}", "type checked `max`!".green()),
+        Err(e) => {
+            println!("{}\n{e}", "Did not type check:".red());
+            return;
+        }
+    }
 
     let interpreter = Interpreter::new(sema);
     if let Err(err) = interpreter.evaluate() {
