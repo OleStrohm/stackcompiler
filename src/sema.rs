@@ -1,8 +1,9 @@
 use crate::interpret::Value;
 use crate::token::{Lexer, Token};
 use std::collections::HashMap;
+use std::fmt::Debug;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Op {
     Plus,
     Minus,
@@ -11,7 +12,7 @@ pub enum Op {
     Greater,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Atom {
     Num(u64),
     Bool(bool),
@@ -24,6 +25,27 @@ pub enum Atom {
 pub enum Function {
     Code(Vec<Atom>, Vec<String>, Vec<String>),
     Builtin(Box<dyn Fn(&mut Vec<Value>)>),
+}
+
+impl Debug for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Function::Code(block, params, rets) => {
+                write!(f, "Code({block:?}, {params:?}, {rets:?})")
+            }
+            Function::Builtin(_) => write!(f, "<builtin>"),
+        }
+    }
+}
+
+impl PartialEq for Function {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (c @ Function::Code(..), other @ Function::Code(..)) => c.eq(other),
+            (b @ Function::Builtin(_), other @ Function::Builtin(_)) => (b).eq(other),
+            _ => false,
+        }
+    }
 }
 
 pub struct Sema {
@@ -42,7 +64,7 @@ impl Sema {
         if &ret_stack == ret {
             Ok(())
         } else {
-            Err("Return type is wrong".into())
+            Err(format!("Too many values left over on stack: `{ret_stack:?}`"))
         }
     }
 
@@ -79,6 +101,14 @@ impl Sema {
                         }
                         "print" => {
                             if type_stack.pop().is_none() {
+                                return Err(format!("Too few values for `{f}`"));
+                            }
+                        }
+                        "dup" => {
+                            if let Some(top) = type_stack.pop() {
+                                type_stack.push(top.clone());
+                                type_stack.push(top);
+                            } else {
                                 return Err(format!("Too few values for `{f}`"));
                             }
                         }
@@ -140,6 +170,7 @@ impl Sema {
                         Some(otherwise) => {
                             let otherwise_ret =
                                 self.get_return_stack_of_block(otherwise, type_stack)?;
+
                             if then_ret != otherwise_ret {
                                 return Err(
                                     "Then and else branches must end with the same stack".into()
@@ -155,7 +186,13 @@ impl Sema {
                     }
                 }
                 Atom::While(block) => {
-                    let ret = self.get_return_stack_of_block(block, type_stack.clone())?;
+                    if Some("bool") != type_stack.pop().as_deref() {
+                        return Err("while statement must start with a conditional on the top of the stack".into());
+                    }
+                    let mut ret = self.get_return_stack_of_block(block, type_stack.clone())?;
+                    if Some("bool") != ret.pop().as_deref() {
+                        return Err("while statement must end with a conditional".into());
+                    }
                     if ret != type_stack {
                         return Err("While block can not change the stack".into());
                     }
@@ -293,5 +330,96 @@ impl Ast {
             };
         }
         Ast::Prog(items)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prog_to_sema(prog: &'static str) -> Sema {
+        let mut lexer = crate::token::lex(prog);
+        let ast = Ast::parse(prog, &mut lexer);
+        Sema::from_ast(ast)
+    }
+
+    #[test]
+    fn basic_parse() {
+        let sema = prog_to_sema(
+            r#"
+            fn main begin
+                1 2 print print
+            end
+        "#,
+        );
+        assert_eq!(
+            format!("{:?}", sema.functions()),
+            r#"{"main": Code([Num(1), Num(2), Fn("print"), Fn("print")], [], [])}"#,
+        );
+    }
+
+    #[test]
+    fn if_type_check() {
+        let sema = prog_to_sema(
+            r#"
+            fn good begin
+                true if 1 else 2 end print
+            end
+            fn bad begin
+                true if 1 else 2 end
+            end
+        "#,
+        );
+        assert!(sema.type_check("good").is_ok());
+        assert!(sema.type_check("bad").is_err());
+    }
+
+    #[test]
+    fn while_type_check() {
+        let sema = prog_to_sema(
+            r#"
+            fn good begin
+                5 dup 0 > while
+                    dup print
+                    1 -
+                    dup 0 >
+                end
+                print
+            end
+            fn bad begin
+                5 dup 0 > while
+                    dup print
+                    1 -
+                    0 >
+                end
+            end
+        "#,
+        );
+        assert!(sema.type_check("good").is_ok());
+        assert!(sema.type_check("bad").is_err());
+    }
+
+    #[test]
+    fn function_type_check() {
+        let sema = prog_to_sema(
+            r#"
+            fn good begin
+                3 2 max print
+            end
+            fn bad begin
+                3 max print
+            end
+            fn max with int int returns int begin
+                over over > if
+                    drop
+                else
+                    rot drop
+                end
+            end
+        "#,
+        );
+        assert!(sema.type_check("good").is_ok());
+        assert!(sema.type_check("bad").is_err());
+        assert!(sema.type_check("max").is_ok());
     }
 }
