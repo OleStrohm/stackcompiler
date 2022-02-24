@@ -38,16 +38,6 @@ impl Debug for Function {
     }
 }
 
-impl PartialEq for Function {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (c @ Function::Code(..), other @ Function::Code(..)) => c.eq(other),
-            (b @ Function::Builtin(_), other @ Function::Builtin(_)) => (b).eq(other),
-            _ => false,
-        }
-    }
-}
-
 pub struct Sema {
     functions: HashMap<String, Function>,
 }
